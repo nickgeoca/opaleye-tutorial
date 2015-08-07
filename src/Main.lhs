@@ -1,52 +1,92 @@
+> {-# LANGUAGE TemplateHaskell #-}
+> 
 > module TutorialManipulation where
 >
 > import           Prelude hiding (sum)
 >
-> import           Opaleye (Column, Table(Table),
->                           required, optional, (.==), (.<),
->                           arrangeDeleteSql, arrangeInsertSql,
->                           arrangeUpdateSql, arrangeInsertReturningSql,
->                           PGInt4, PGFloat8)
->
+> import           Opaleye (Column, Nullable, matchNullable, isNull,
+>                          Table(Table), required, queryTable,
+>                          Query, QueryArr, restrict, (.==), (.<=), (.&&), (.<),
+>                          (.++), ifThenElse, pgString, aggregate, groupBy,
+>                          count, avg, sum, leftJoin, runQuery,
+>                          showSqlForPostgres, Unpackspec,
+>                          PGInt4, PGInt8, PGText, PGDate, PGFloat8, PGBool)
+> import           Data.Profunctor.Product.TH (makeAdaptorAndInstance)
 > import           Data.Profunctor.Product (p3)
 > import           Data.Profunctor.Product.Default (Default, def)
 > import qualified Opaleye.Internal.Unpackspec as U
 
+Key words: BUG, TODO, NOTE
 
-Table
-Note: Sparse array as go further back in time. E.g. 1M managers, but in 1970 there may have been 1000. 
+--------------------------------------------------
+Cached types
+
+> data Cache v c = Cache
+>  { value :: v
+>  , cache :: Column (Nullable c) } 
+
+> type CacheSumWorth v = Cache v PGFloat8
+
+> type ManagerColumnC = Cache
+>                       (Manager' (Column PGText) SecurityColumn)
+>                       PGFloat8
+
+
+> type HistMngrSecColumn = History' (Column YearQuarter) (Column ManagerColumnC)
+
+> -- TODO: Remove this type?
+> type HistoryOfManagersSecsC = Cache
+>                               (History' (Column YearQuarter) (Column ManagerColumnC))
+>                               PGFloat8
+
+class Cache a where
+  update :: a        -- Update data value, then cache value
+  getCache :: a -> a -- If null, then calculate cache value, TODO: else default cache value? e.g. security holdings $0.. see Data.Default 
+  calculate :: a     -- Calculate cache value based on data value
+
+> $(makeAdaptorAndInstance "pBirthday" ''Birthday')   -- Template Haskell
+> mngrSecHistTable :: Table (CacheSumWorth HistMngrSecColumn)
+>                           (CacheSumWorth HistMngrSecColumn)
+> mngrSecHistTable = Table "mngrSecHistTable" 
+>                    (mngrSecHistTable Cache { value = required "histMngrSec"
+>                                            , cache = required "quarterlyTotal" })
+
+--------------------------------------------------
+Non-cached types
+
+
 
 example Security "Co1, StockA" 40 100
 example Security "Co1, StockB" 10 5000
+
 > data Security' a b c = Security
-> { name  :: a
-> , count :: b
-> , value :: c }
+>  { name  :: a
+>  , count :: b
+>  , value :: c }
 
 > type Security       = Security' Text Int Int
 > type SecurityColumn = Security' (Column PGText) (Column PGInt4) (Column PGInt4)
 
 > data Manager' a b = Manager 
-> { name       :: a
-> , securities :: b }
+>  { name       :: a
+>  , securities :: b }
 
 > type Manager       = Manager' Text [Security]
 > type ManagerColumn = Manager' (Column PGText) SecurityColumn
 
 > data History' = History
-> { date  :: a
-> , value :: b }
+>  { date  :: a
+>  , value :: b }
 
 > type YearQuarter = (Int, Int)  -- Year, Quarter. TODO: Make own type
-> type HistoryOfManagersSec 
-> = History' (Column YearQuarter) 
->            (Column ManagerColumn)
+> type HistoryOfManagersSec = History' (Column YearQuarter) (Column ManagerColumn)
 
-> managersSecuritiesHistory :: Table HistoryOfManagersSec
->                                    HistoryOfManagersSec
-> managersSecuritiesHistory = TODO HERE!
+Table
+managersSecuritiesHistory :: Table HistoryOfManagersSec
+                                   HistoryOfManagersSec
+managersSecuritiesHistory = TODO HERE!
 
-> TODO HERE!
+TODO HERE!
 $(makeAdaptorAndInstance "pBirthday" ''Birthday')   -- Template Haskell
 $(makeAdaptorAndInstance "pBirthday" ''Birthday')   -- Template Haskell
 
@@ -55,13 +95,13 @@ Query
 
 query (manager, quarter)
 
-> type QueryComp a = QuerryArr a ()
+type QueryComp a = QuerryArr a ()
 
 QueryComp 
 
-> managerQuarter :: Query ManagerQuarter
-> managerQuarter = proc () -> do
->   
+managerQuarter :: Query ManagerQuarter
+managerQuarter = proc () -> do
+   
 
 
 Manipulation
