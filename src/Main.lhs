@@ -24,36 +24,44 @@
 
 Key words: BUG, TODO, NOTE
 
---------------------------------------------------
-Cached types
-
-> -- Container for plain/regular data values and the cache values
-> data Cache' v c = Cache
->  { dataVal  :: v 
->  , cacheVal :: c } 
-
-> type CacheSumWorth v = Cache' v (Column (Nullable PGFloat8))
-
-> class Cache v c where
->   update :: v -> c -> String        -- Update data value, then cache value
->   -- getCache :: a -> a -- If null, then calculate cache value, TODO: else default cache value? e.g. security holdings $0.. see Data.Default 
->   -- calculate :: a     -- Calculate cache value based on data value
+Cabal Repl
+ conn <- connect ConnectInfo { connectHost="127.0.0.1",connectPort=5432,connectUser="postgres",connectPassword="password",connectDatabase = "managers" }
+ a <- runQuery conn secQuery :: IO [Security]
+ mapM_ (putStrLn.show) a
 
 --------------------------------------------------
 Types
 
 Security
 
-> -- example (Security "Co1 StockA" 40 100, 
-> --          Security "Co1 StockB" 10 5000)
-> data Security' a b c = Security
->  { secName  :: a
->  , secCount :: b
->  , secValue :: c }
-> 
-> type Security       = Security' String Int Int
-> 
-> type SecurityColumn = Security' (Column PGText) (Column PGInt4) (Column PGInt4)
+> data SecurityName' a = SecurityName a deriving Show
+> $(makeAdaptorAndInstance "pSecurityName" ''SecurityName')
+> type ColumnSecurityName = SecurityName' (Column PGText)
+> type SecurityName       = SecurityName' String
+
+> data SecurityQuant' a = SecurityQuant a deriving Show
+> $(makeAdaptorAndInstance "pSecurityQuant" ''SecurityQuant')
+> type ColumnSecurityQuant = SecurityQuant' (Column PGInt4)
+> type SecurityQuant       = SecurityQuant' Int
+
+> data SecurityValue' a = SecurityValue a deriving Show
+> $(makeAdaptorAndInstance "pSecurityValue" ''SecurityValue')
+> type ColumnSecurityValue = SecurityValue' (Column PGFloat8)
+> type SecurityValue       = SecurityValue' Double
+
+> data SecuritySector' a = SecuritySector a deriving Show
+> $(makeAdaptorAndInstance "pSecuritySector" ''SecuritySector')
+> type ColumnNullableSecuritySector = SecuritySector' (Column (Nullable PGText))
+> type SecuritySector               = SecuritySector' (Maybe String)
+
+> data Security' a b c d = Security
+>  { secName   :: a
+>  , secQuant  :: b
+>  , secValue  :: c 
+>  , secSector :: d } deriving Show
+> $(makeAdaptorAndInstance "pSecurity" ''Security')
+> type Security = Security' SecurityName SecurityQuant SecurityValue SecuritySector
+> type ColumnSecurity = Security' ColumnSecurityName ColumnSecurityQuant ColumnSecurityValue ColumnNullableSecuritySector
 
 Manager
 
@@ -61,11 +69,7 @@ Manager
 >  { manName   :: a
 >  , manSecurs :: b }
 > 
-> type Manager       = Manager' String [Security]
-> 
-> type ManagerColumn = Manager' (Column PGText) (Column SecurityColumn)
-> 
-> type ManagerColumnC = CacheSumWorth ManagerColumn  -- Cache each managers total 
+> type ColumnManager = Manager' (Column PGText) (Column ColumnSecurity)
 
 History
 
@@ -74,27 +78,23 @@ History
 >  { histDate  :: a
 >  , histValue :: b }
 > 
-> type HistMngrSecColumn = History' (Column PGDate) (Column ManagerColumnC)
-> 
-> type HistMngrSecColumnC = CacheSumWorth HistMngrSecColumn -- Cache each quarterly total
+> type ColumnQrtrlyMngrSec = History' (Column PGDate) (Column ColumnManager)
 
 --------------------------------------------------
 Table
 
-> $(makeAdaptorAndInstance "pCache" ''Cache')   
 > $(makeAdaptorAndInstance "pHistory" ''History')   
 
-> mngrSecHistTable :: Table HistMngrSecColumnC
->                           HistMngrSecColumnC
+> mngrSecHistTable :: Table ColumnQrtrlyMngrSec
+>                           ColumnQrtrlyMngrSec
 > mngrSecHistTable = Table "mngrSecHistTable" 
->                    (pCache Cache { dataVal  = pHistory (History (required "quarter") 
->                                                                 (required "managers"))
->                                  , cacheVal = required "quarterlyTotal" })
+>                    (pHistory $ History { histDate  = required "quarter"
+>                                        , histValue = required "managers" })
 
 --------------------------------------------------
 Queries
 
-> mngrSecHistQuery :: Query HistMngrSecColumnC
+> mngrSecHistQuery :: Query ColumnQrtrlyMngrSec
 > mngrSecHistQuery = queryTable mngrSecHistTable
 
 > restrictDate :: Day -> QueryArr (History' (Column PGDate) a) ()
@@ -108,8 +108,21 @@ Queries
 > 
 > 
 
-> mngrPercentQuery :: Date -> String -> QueryArr HistMngrSecColumnC (Column PGText, Column PGFloat8)
-> mngrPercentQuery date mngrId = proc (Cache d c) -> do
+
+> secTable :: Table ColumnSecurity
+>                   ColumnSecurity
+> secTable = Table "security" 
+>            (pSecurity $ Security { secName   = pSecurityName   $ SecurityName   $ required "name"
+>                                  , secQuant  = pSecurityQuant  $ SecurityQuant  $ required "quant"
+>                                  , secValue  = pSecurityValue  $ SecurityValue  $ required "value"
+>                                  , secSector = pSecuritySector $ SecuritySector $ required "sector" } ) 
+
+> secQuery :: Query ColumnSecurity
+> secQuery = queryTable secTable
+
+
+mngrPercentQuery :: Date -> String -> QueryArr QrtrlyMngrSecColumn (Column PGText, Column PGFloat8)
+mngrPercentQuery date mngrId = proc (Cache d c) -> do
 
 if managerCache == Null then CalcCache and put calc in cache; return cache 
                         else return cache
@@ -137,6 +150,9 @@ QueryComp
 managerQuarter :: Query ManagerQuarter
 managerQuarter = proc () -> do
    
+> printSql :: Default Unpackspec a a => Query a -> IO ()
+> printSql = putStrLn . showSqlForPostgres
+
 --------------------------------------------------
 Maybe add this to code
 newtype ManagerId = ManagerId { managerId :: String} 
@@ -145,3 +161,5 @@ newtype ManagerId = ManagerId { managerId :: String}
 Questions
 code below doesn't work b/c (Eq a) can't be restricted on a@(Column a0) 
 restrictDate :: Eq a => a -> QueryArr (History' a b) ()
+
+
