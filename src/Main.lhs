@@ -16,7 +16,10 @@
 >                          showSqlForPostgres, Unpackspec,
 >                          PGInt4, PGInt8, PGText, PGDate, PGFloat8, PGBool,
 >                          pgDay)
+> import qualified Opaleye.Aggregate as A
+> import           Opaleye.Aggregate (Aggregator, aggregate)
 > import           Data.Profunctor.Product.TH (makeAdaptorAndInstance)
+> import           Data.Profunctor (dimap, lmap, rmap)
 > import           Data.Profunctor.Product (p3)
 > import           Data.Profunctor.Product.Default (Default, def)
 > import           Data.Time.Calendar
@@ -25,6 +28,7 @@
 Key words: BUG, TODO, NOTE
 
 Cabal Repl
+ import Database.PostgreSQL.Simple.Internal
  conn <- connect ConnectInfo { connectHost="127.0.0.1",connectPort=5432,connectUser="postgres",connectPassword="password",connectDatabase = "managers" }
  a <- runQuery conn secQuery :: IO [Security]
  mapM_ (putStrLn.show) a
@@ -35,22 +39,30 @@ Types
 Security
 
 > data SecurityName' a = SecurityName a deriving Show
+> securityName (SecurityName x) = x
 > $(makeAdaptorAndInstance "pSecurityName" ''SecurityName')
+> securityName' s = pSecurityName $ SecurityName $ required s
 > type ColumnSecurityName = SecurityName' (Column PGText)
 > type SecurityName       = SecurityName' String
 
 > data SecurityQuant' a = SecurityQuant a deriving Show
+> securityQuant (SecurityQuant x) = x
 > $(makeAdaptorAndInstance "pSecurityQuant" ''SecurityQuant')
-> type ColumnSecurityQuant = SecurityQuant' (Column PGInt4)
-> type SecurityQuant       = SecurityQuant' Int
+> securityQuant' s = pSecurityQuant $ SecurityQuant $ required s
+> type ColumnSecurityQuant = SecurityQuant' (Column PGFloat8)
+> type SecurityQuant       = SecurityQuant' Double
 
 > data SecurityValue' a = SecurityValue a deriving Show
+> securityValue (SecurityValue x) = x
 > $(makeAdaptorAndInstance "pSecurityValue" ''SecurityValue')
+> securityValue' s = pSecurityValue $ SecurityValue $ required s
 > type ColumnSecurityValue = SecurityValue' (Column PGFloat8)
 > type SecurityValue       = SecurityValue' Double
 
 > data SecuritySector' a = SecuritySector a deriving Show
+> securitySector (SecuritySector x) = x
 > $(makeAdaptorAndInstance "pSecuritySector" ''SecuritySector')
+> securitySector' s = pSecuritySector $ SecuritySector $ required s
 > type ColumnNullableSecuritySector = SecuritySector' (Column (Nullable PGText))
 > type SecuritySector               = SecuritySector' (Maybe String)
 
@@ -73,7 +85,6 @@ Manager
 
 History
 
-> -- Container for data and a date
 > data History' a b = History
 >  { histDate  :: a
 >  , histValue :: b }
@@ -108,50 +119,30 @@ Queries
 > 
 > 
 
-
 > secTable :: Table ColumnSecurity
 >                   ColumnSecurity
 > secTable = Table "security" 
->            (pSecurity $ Security { secName   = pSecurityName   $ SecurityName   $ required "name"
->                                  , secQuant  = pSecurityQuant  $ SecurityQuant  $ required "quant"
->                                  , secValue  = pSecurityValue  $ SecurityValue  $ required "value"
->                                  , secSector = pSecuritySector $ SecuritySector $ required "sector" } ) 
+>            (pSecurity $ Security { secName   = securityName'   "name"
+>                                  , secQuant  = securityQuant'  "quant"
+>                                  , secValue  = securityValue'  "value"
+>                                  , secSector = securitySector' "sector" 
+>                                  }) 
 
 > secQuery :: Query ColumnSecurity
 > secQuery = queryTable secTable
 
+abc <- runQuery conn $  aggregate secSum secQuery :: IO [Double]
 
-mngrPercentQuery :: Date -> String -> QueryArr QrtrlyMngrSecColumn (Column PGText, Column PGFloat8)
-mngrPercentQuery date mngrId = proc (Cache d c) -> do
+> secNetWorth :: Aggregator ColumnSecurity (Column PGFloat8)
+> secNetWorth = lmap (\sec ->  val sec * quant sec) sum
+>   where val   = securityValue . secValue 
+>         quant = securityQuant . secQuant 
 
-if managerCache == Null then CalcCache and put calc in cache; return cache 
-                        else return cache
-if dateCache == Null then CalcCache and put calc in cache; return cache 
-                        else return cache
-[managerCache] / dateCache 
-
-
-   restrictDate date   -< d
-   restrictMngr mngrId -< 
-
-bossQuery :: QueryArr (Column PGText, Column (Nullable PGText)) (Column PGText)
-bossQuery = proc (name, nullableBoss) -> do
-  returnA -< matchNullable (name .++ pgString " has no boss")
-                           (\boss -> pgString "The boss of " .++ name
-                                     .++ pgString " is " .++ boss)
-                           nullableBoss
-
-query (manager, quarter)
-
-type QueryComp a = QuerryArr a ()
-
-QueryComp 
-
-managerQuarter :: Query ManagerQuarter
-managerQuarter = proc () -> do
    
+
 > printSql :: Default Unpackspec a a => Query a -> IO ()
 > printSql = putStrLn . showSqlForPostgres
+
 
 --------------------------------------------------
 Maybe add this to code
