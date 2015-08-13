@@ -44,29 +44,29 @@ Security
 > securityName (SecurityName x) = x
 > $(makeAdaptorAndInstance "pSecurityName" ''SecurityName')
 > securityName' s = pSecurityName $ SecurityName $ required s
-> type ColumnSecurityName = SecurityName' (Column PGText)
 > type SecurityName       = SecurityName' String
+> type ColumnSecurityName = SecurityName' (Column PGText)
 
 > data SecurityQuant' a = SecurityQuant a deriving Show
 > securityQuant (SecurityQuant x) = x
 > $(makeAdaptorAndInstance "pSecurityQuant" ''SecurityQuant')
 > securityQuant' s = pSecurityQuant $ SecurityQuant $ required s
-> type ColumnSecurityQuant = SecurityQuant' (Column PGFloat8)
 > type SecurityQuant       = SecurityQuant' Double
+> type ColumnSecurityQuant = SecurityQuant' (Column PGFloat8)
 
 > data SecurityValue' a = SecurityValue a deriving Show
 > securityValue (SecurityValue x) = x
 > $(makeAdaptorAndInstance "pSecurityValue" ''SecurityValue')
 > securityValue' s = pSecurityValue $ SecurityValue $ required s
-> type ColumnSecurityValue = SecurityValue' (Column PGFloat8)
 > type SecurityValue       = SecurityValue' Double
+> type ColumnSecurityValue = SecurityValue' (Column PGFloat8)
 
 > data SecuritySector' a = SecuritySector a deriving Show
 > securitySector (SecuritySector x) = x
 > $(makeAdaptorAndInstance "pSecuritySector" ''SecuritySector')
 > securitySector' s = pSecuritySector $ SecuritySector $ required s
+> type SecuritySectorM              = SecuritySector' (Maybe String)
 > type ColumnNullableSecuritySector = SecuritySector' (Column (Nullable PGText))
-> type SecuritySector               = SecuritySector' (Maybe String)
 
 > data Security' a b c d = Security
 >  { secName   :: a
@@ -74,7 +74,13 @@ Security
 >  , secValue  :: c 
 >  , secSector :: d } deriving Show
 > $(makeAdaptorAndInstance "pSecurity" ''Security')
-> type Security = Security' SecurityName SecurityQuant SecurityValue SecuritySector
+> security' n q v s = pSecurity $ Security { secName   = securityName' n
+>                                          , secQuant  = securityQuant' q
+>                                          , secValue  = securityValue' v
+>                                          , secSector = securitySector' s
+>                                          }
+
+> type Security       = Security'       SecurityName       SecurityQuant       SecurityValue               SecuritySectorM
 > type ColumnSecurity = Security' ColumnSecurityName ColumnSecurityQuant ColumnSecurityValue ColumnNullableSecuritySector
 
 Manager
@@ -82,8 +88,10 @@ Manager
 > data Manager' a b = Manager 
 >  { mngrName     :: a
 >  , mngrSecurCol :: b }
-> 
-> type ColumnManager = Manager' (Column PGText) (Column ColumnSecurity)
+> $(makeAdaptorAndInstance "pManager" ''Manager')
+> manager' name sec = pManager $ Manager { mngrName = required name, mngrSecurCol = sec }
+> type Manager       = Manager'         String        Security
+> type ColumnManager = Manager' (Column PGText) ColumnSecurity
 
 History
 
@@ -91,7 +99,8 @@ History
 >  { histDate  :: a
 >  , histValue :: b }
 > 
-> type ColumnQrtrlyMngrSec = History' (Column PGDate) (Column ColumnManager)
+> type QrtrlyMngrSec       = History'         Day           Manager
+> type ColumnQrtrlyMngrSec = History' (Column PGDate) ColumnManager
 
 --------------------------------------------------
 Tables
@@ -101,21 +110,29 @@ Tables
 > mngrSecHistTable :: Table ColumnQrtrlyMngrSec
 >                           ColumnQrtrlyMngrSec
 > mngrSecHistTable = Table "mngrSecHistTable" 
->                    (pHistory $ History { histDate  = required "quarter"
->                                        , histValue = required "managers" })
+>                    (pHistory $ History { histDate  = required "quarter"  
+>                                        , histValue = manager' "manager" (security' "name" "quant" "value" "sector")  -- TODO: Put column names in type section?
+>                                        })
 
 --------------------------------------------------
 Queries
 
+> type ColumnManagerNetWorth = Manager' (Column PGText) (Column PGFloat8)
+> type ColumnQrtrlyMngrNetWorth   = History' (Column PGDate) ColumnManagerNetWorth
+
 > mngrSecHistQuery :: Query ColumnQrtrlyMngrSec
 > mngrSecHistQuery = queryTable mngrSecHistTable
 
-> mngrNetWorthHist :: Query (History' (Column PGDate) 
->                                     (Column ColumnManagerNetWorth))
+> -- TODO: QueryArr ColumnQrtrlyMngrSec ColumnQrtrlyMngrNetWorth
+> mngrNetWorthHist :: Query ColumnQrtrlyMngrNetWorth
 > mngrNetWorthHist = 
->    aggregate (pHistory $ History { histDate = groupBy
->                                  , histValue = mngrColNetWorth })
->              mngrSecHistQuery
+>   aggregate (pHistory $ History { histDate = groupBy
+>                                 , histValue = pManager $ Manager { mngrName = groupBy
+>                                                                  , mngrSecurCol = secColNetWorth 
+>                                                                  }
+>                                 })
+>             mngrSecHistQuery
+BUG HERE: Move aggeragator in own section?
 
 --------------------------------------------------
 Aggregators
@@ -123,14 +140,10 @@ Aggregators
 > -- TODO: Return PGFloat8 instead of (Column PGFloat8)
 > secColNetWorth :: Aggregator ColumnSecurity (Column PGFloat8)
 > secColNetWorth = lmap (\sec ->  val sec * quant sec) sum
->   where val   = securityValue . secValue 
->         quant = securityQuant . secQuant 
-
-> type ColumnManagerNetWorth = Manager' (Column PGText) (Column (Column PGFloat8))
+>   where val   = securityValue . secValue
+>         quant = securityQuant . secQuant
 
 
-> mngrColNetWorth :: Aggregator (Column ColumnManager) (Column ColumnManagerNetWorth)
-> mngrColNetWorth = lmap undefined groupBy
 
 (\colMngr -> fn1 colMngr
 
@@ -156,6 +169,12 @@ Util functions
 
 
 -- ##################################################
+
+           (pSecurity $ Security { secName   = pSecurityName $ SecurityName $ required "name"
+                                 , secQuant  = securityQuant'  "quant"
+                                 , secValue  = securityValue'  "value"
+                                 , secSector = securitySector' "sector" 
+                                 }) 
 
 > secTable :: Table ColumnSecurity
 >                   ColumnSecurity
