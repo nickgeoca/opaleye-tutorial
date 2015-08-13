@@ -130,7 +130,7 @@ Aggregators
 
 
 > mngrColNetWorth :: Aggregator (Column ColumnManager) (Column ColumnManagerNetWorth)
-> mngrColNetWorth = lmap (\(Manager name secCol) -> undefined) groupBy
+> mngrColNetWorth = lmap undefined groupBy
 
 (\colMngr -> fn1 colMngr
 
