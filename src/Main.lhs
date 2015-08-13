@@ -11,7 +11,7 @@
 > import           Opaleye (Column, Nullable, matchNullable, isNull,
 >                          Table(Table), required, queryTable,
 >                          Query, QueryArr, restrict, (.==), (.<=), (.&&), (.<),
->                          (.++), ifThenElse, pgString, aggregate, groupBy,
+>                          (.++), ifThenElse, pgString, pgDouble, aggregate, groupBy,
 >                          count, avg, sum, leftJoin, runQuery,
 >                          showSqlForPostgres, Unpackspec,
 >                          PGInt4, PGInt8, PGText, PGDate, PGFloat8, PGBool,
@@ -31,7 +31,9 @@ Cabal Repl
  import Database.PostgreSQL.Simple.Internal
  conn <- connect ConnectInfo { connectHost="127.0.0.1",connectPort=5432,connectUser="postgres",connectPassword="password",connectDatabase = "managers" }
  a <- runQuery conn secQuery :: IO [Security]
- mapM_ (putStrLn.show) a
+ mapM_ print a
+ abc <- runQuery conn $  aggregate secColNetWorth secQuery :: IO [Double]
+
 
 --------------------------------------------------
 Types
@@ -78,8 +80,8 @@ Security
 Manager
 
 > data Manager' a b = Manager 
->  { manName   :: a
->  , manSecurs :: b }
+>  { mngrName     :: a
+>  , mngrSecurCol :: b }
 > 
 > type ColumnManager = Manager' (Column PGText) (Column ColumnSecurity)
 
@@ -92,7 +94,7 @@ History
 > type ColumnQrtrlyMngrSec = History' (Column PGDate) (Column ColumnManager)
 
 --------------------------------------------------
-Table
+Tables
 
 > $(makeAdaptorAndInstance "pHistory" ''History')   
 
@@ -108,16 +110,52 @@ Queries
 > mngrSecHistQuery :: Query ColumnQrtrlyMngrSec
 > mngrSecHistQuery = queryTable mngrSecHistTable
 
-> restrictDate :: Day -> QueryArr (History' (Column PGDate) a) ()
-> restrictDate date = proc history -> do
->   restrict -< pgDay date .== histDate history
-> 
-> restrictMngr :: String -> QueryArr (Manager' (Column PGText) (Column a)) ()
-> restrictMngr mngr = proc managers -> do 
->   restrict -< pgString mngr .== manName managers
-> 
-> 
-> 
+> mngrNetWorthHist :: Query (History' (Column PGDate) 
+>                                     (Column ColumnManagerNetWorth))
+> mngrNetWorthHist = 
+>    aggregate (pHistory $ History { histDate = groupBy
+>                                  , histValue = mngrColNetWorth })
+>              mngrSecHistQuery
+
+--------------------------------------------------
+Aggregators
+
+> -- TODO: Return PGFloat8 instead of (Column PGFloat8)
+> secColNetWorth :: Aggregator ColumnSecurity (Column PGFloat8)
+> secColNetWorth = lmap (\sec ->  val sec * quant sec) sum
+>   where val   = securityValue . secValue 
+>         quant = securityQuant . secQuant 
+
+> type ColumnManagerNetWorth = Manager' (Column PGText) (Column (Column PGFloat8))
+
+
+> mngrColNetWorth :: Aggregator (Column ColumnManager) (Column ColumnManagerNetWorth)
+> mngrColNetWorth = lmap (\(Manager name secCol) -> undefined) groupBy
+
+(\colMngr -> fn1 colMngr
+
+
+fn1 :: Column ColumnManager -> Column ColumnManagerNetWorth 
+fn1 colMngrCol = fmap colMngrCol
+
+mngrColNetWorth :: Aggregator ColumnManager (Manager' (Column PGText) (Column (Column PGFloat8)))
+mngrColNetWorth = secColNetWorth
+
+mngrColNetWorth :: Aggregator ColumnManager (Manager' (Column PGText) (Column (Column PGFloat8)))
+mngrColNetWorth = dimap (\mngr -> mngrSecurCol mngr) (\f-> Manager (pgString "hey") f) secColNetWorth
+
+    Expected type: Aggregator (Column ColumnSecurity) (Column (Column PGFloat8))
+      Actual type: Aggregator ColumnSecurity (Column PGFloat8)
+   
+--------------------------------------------------
+Util functions
+
+> printSql :: Default Unpackspec a a => Query a -> IO ()
+> printSql = putStrLn . showSqlForPostgres
+
+
+
+-- ##################################################
 
 > secTable :: Table ColumnSecurity
 >                   ColumnSecurity
@@ -131,26 +169,11 @@ Queries
 > secQuery :: Query ColumnSecurity
 > secQuery = queryTable secTable
 
-abc <- runQuery conn $  aggregate secSum secQuery :: IO [Double]
 
-> secNetWorth :: Aggregator ColumnSecurity (Column PGFloat8)
-> secNetWorth = lmap (\sec ->  val sec * quant sec) sum
->   where val   = securityValue . secValue 
->         quant = securityQuant . secQuant 
-
-   
-
-> printSql :: Default Unpackspec a a => Query a -> IO ()
-> printSql = putStrLn . showSqlForPostgres
-
-
---------------------------------------------------
-Maybe add this to code
-newtype ManagerId = ManagerId { managerId :: String} 
-
---------------------------------------------------
-Questions
-code below doesn't work b/c (Eq a) can't be restricted on a@(Column a0) 
-restrictDate :: Eq a => a -> QueryArr (History' a b) ()
-
-
+> restrictDate :: Day -> QueryArr (History' (Column PGDate) a) ()
+> restrictDate date = proc history -> do
+>   restrict -< pgDay date .== histDate history
+> 
+> restrictMngr :: String -> QueryArr (Manager' (Column PGText) (Column a)) ()
+> restrictMngr mngr = proc managers -> do 
+>   restrict -< pgString mngr .== mngrName managers
