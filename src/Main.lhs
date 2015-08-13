@@ -23,17 +23,10 @@
 > import           Data.Profunctor.Product (p3)
 > import           Data.Profunctor.Product.Default (Default, def)
 > import           Data.Time.Calendar
+> import           Control.Arrow (returnA, (<<<))
 > import qualified Opaleye.Internal.Unpackspec as U
 
 Key words: BUG, TODO, NOTE
-
-Cabal Repl
- import Database.PostgreSQL.Simple.Internal
- conn <- connect ConnectInfo { connectHost="127.0.0.1",connectPort=5432,connectUser="postgres",connectPassword="password",connectDatabase = "managers" }
- a <- runQuery conn secQuery :: IO [Security]
- mapM_ print a
- abc <- runQuery conn $  aggregate secColNetWorth secQuery :: IO [Double]
-
 
 --------------------------------------------------
 Types
@@ -87,7 +80,7 @@ Manager
 
 > data Manager' a b = Manager 
 >  { mngrName     :: a
->  , mngrSecurCol :: b }
+>  , mngrSecurCol :: b } deriving Show -- TODO: Rename this to mngrValue? mngrSecurCol is being applied elsewhere without that context
 > $(makeAdaptorAndInstance "pManager" ''Manager')
 > manager' name sec = pManager $ Manager { mngrName = required name, mngrSecurCol = sec }
 > type Manager       = Manager'         String        Security
@@ -97,69 +90,81 @@ History
 
 > data History' a b = History
 >  { histDate  :: a
->  , histValue :: b }
+>  , histValue :: b } deriving Show
 > 
 > type QrtrlyMngrSec       = History'         Day           Manager
 > type ColumnQrtrlyMngrSec = History' (Column PGDate) ColumnManager
 
 --------------------------------------------------
+Sql
+
 Tables
 
 > $(makeAdaptorAndInstance "pHistory" ''History')   
 
-> mngrSecHistTable :: Table ColumnQrtrlyMngrSec
+> tMngrSecHist :: Table ColumnQrtrlyMngrSec
 >                           ColumnQrtrlyMngrSec
-> mngrSecHistTable = Table "mngrSecHistTable" 
->                    (pHistory $ History { histDate  = required "quarter"  
->                                        , histValue = manager' "manager" (security' "name" "quant" "value" "sector")  -- TODO: Put column names in type section?
->                                        })
+> tMngrSecHist = Table "tMngrSecHist" 
+>    (pHistory $ History 
+>        { histDate  = required "quarter"  
+>        , histValue = manager' "mngr_name" (security' "sec_name" "sec_quant" "sec_value" "sec_sector")  -- TODO: Put column names in type section?
+>        }
+>    )
 
---------------------------------------------------
 Queries
 
 > type ColumnManagerNetWorth = Manager' (Column PGText) (Column PGFloat8)
-> type ColumnQrtrlyMngrNetWorth   = History' (Column PGDate) ColumnManagerNetWorth
+> type ColumnQrtrlyMngrNetWorth = History' (Column PGDate) ColumnManagerNetWorth
 
-> mngrSecHistQuery :: Query ColumnQrtrlyMngrSec
-> mngrSecHistQuery = queryTable mngrSecHistTable
+> type ColumnQrtrlyNetWorth = History' (Column PGDate) (Column PGFloat8)
 
-> -- TODO: QueryArr ColumnQrtrlyMngrSec ColumnQrtrlyMngrNetWorth
-> mngrNetWorthHist :: Query ColumnQrtrlyMngrNetWorth
-> mngrNetWorthHist = 
->   aggregate (pHistory $ History { histDate = groupBy
->                                 , histValue = pManager $ Manager { mngrName = groupBy
->                                                                  , mngrSecurCol = secColNetWorth 
->                                                                  }
->                                 })
->             mngrSecHistQuery
-BUG HERE: Move aggeragator in own section?
+> type ColumnManagerPcntNetWorth = Manager' (Column PGText) (Column PGFloat8)
+> type ManagerPcntNetWorth = Manager' String Double
+> type ColumnQrtrlyMngrPcntNetWorth = History' (Column PGDate) ColumnManagerPcntNetWorth
+> type QrtrlyMngrPcntNetWorth = History' Day ManagerPcntNetWorth
 
---------------------------------------------------
+
+> qMngrSecHist :: Query ColumnQrtrlyMngrSec
+> qMngrSecHist = queryTable tMngrSecHist
+
+> qMngrNetWorthHist ::  Query ColumnQrtrlyMngrSec -> Query ColumnQrtrlyMngrNetWorth
+> qMngrNetWorthHist qry = 
+>   aggregate (pHistory $ History
+>                 { histDate = groupBy
+>                 , histValue = pManager $ Manager
+>                      { mngrName = groupBy
+>                      , mngrSecurCol = aSecColNetWorth  }}) 
+>             qry
+
+
+> qHistNetWorth :: Query ColumnQrtrlyMngrNetWorth -> Query ColumnQrtrlyNetWorth  -- TODO: QueryArr ... 
+> qHistNetWorth qry = 
+>   aggregate (pHistory $ History 
+>                 { histDate = groupBy
+>                 , histValue = aHistColNetWorth })
+>              qry
+
+> qMngrPcntNetWorthHist :: Query ColumnQrtrlyMngrSec -> Query ColumnQrtrlyMngrPcntNetWorth
+> qMngrPcntNetWorthHist qry = proc () -> do 
+>    (History dateMngr (Manager name netWorthMngr))  <- mngrNetWorthHist -< ()
+>    (History dateHist netWorthHist) <- histNetWorth -< ()
+> 
+>    restrict -< dateHist .== dateMngr
+> 
+>    returnA -< History dateMngr (Manager name (netWorthMngr / netWorthHist))
+>      where mngrNetWorthHist = qMngrNetWorthHist qry
+>            histNetWorth = qHistNetWorth mngrNetWorthHist
+
 Aggregators
 
-> -- TODO: Return PGFloat8 instead of (Column PGFloat8)
-> secColNetWorth :: Aggregator ColumnSecurity (Column PGFloat8)
-> secColNetWorth = lmap (\sec ->  val sec * quant sec) sum
+> aSecColNetWorth :: Aggregator ColumnSecurity (Column PGFloat8)
+> aSecColNetWorth = lmap (\sec ->  val sec * quant sec) sum
 >   where val   = securityValue . secValue
 >         quant = securityQuant . secQuant
 
+> aHistColNetWorth :: Aggregator (Manager' (Column PGText) (Column PGFloat8)) (Column PGFloat8)
+> aHistColNetWorth = lmap (\mngr -> mngrSecurCol mngr) sum
 
-
-(\colMngr -> fn1 colMngr
-
-
-fn1 :: Column ColumnManager -> Column ColumnManagerNetWorth 
-fn1 colMngrCol = fmap colMngrCol
-
-mngrColNetWorth :: Aggregator ColumnManager (Manager' (Column PGText) (Column (Column PGFloat8)))
-mngrColNetWorth = secColNetWorth
-
-mngrColNetWorth :: Aggregator ColumnManager (Manager' (Column PGText) (Column (Column PGFloat8)))
-mngrColNetWorth = dimap (\mngr -> mngrSecurCol mngr) (\f-> Manager (pgString "hey") f) secColNetWorth
-
-    Expected type: Aggregator (Column ColumnSecurity) (Column (Column PGFloat8))
-      Actual type: Aggregator ColumnSecurity (Column PGFloat8)
-   
 --------------------------------------------------
 Util functions
 
@@ -167,14 +172,8 @@ Util functions
 > printSql = putStrLn . showSqlForPostgres
 
 
-
--- ##################################################
-
-           (pSecurity $ Security { secName   = pSecurityName $ SecurityName $ required "name"
-                                 , secQuant  = securityQuant'  "quant"
-                                 , secValue  = securityValue'  "value"
-                                 , secSector = securitySector' "sector" 
-                                 }) 
+--------------------------------------------------
+Miscelaneous
 
 > secTable :: Table ColumnSecurity
 >                   ColumnSecurity
@@ -196,3 +195,32 @@ Util functions
 > restrictMngr :: String -> QueryArr (Manager' (Column PGText) (Column a)) ()
 > restrictMngr mngr = proc managers -> do 
 >   restrict -< pgString mngr .== mngrName managers
+
+
+--------------------------------------------------
+Testin & Cabal Repl
+
+Cabal Repl
+ import Database.PostgreSQL.Simple.Internal
+ conn <- connect ConnectInfo { connectHost="127.0.0.1",connectPort=5432,connectUser="postgres",connectPassword="password",connectDatabase = "managers" }
+ a <- runQuery conn secQuery :: IO [Security]
+ mapM_ print a
+ abc <- runQuery conn $  aggregate secColNetWorth secQuery :: IO [Double]
+
+Testing
+ create table tMngrSecHist (quarter date, mngr_name text, sec_name text, sec_quant float8, sec_value float8, sec_sector text);
+ INSERT INTO tMngrSecHist VALUES ('2014-01-01','Paul','Amazon', 50, 10.5, 'tech');
+ INSERT INTO tMngrSecHist VALUES ('2014-01-01','Paul','Amazon', 10, 5.5, 'tech');
+ INSERT INTO tMngrSecHist VALUES ('2014-01-01','George','NEM', 200, 150.12, 'tech');
+ INSERT INTO tMngrSecHist VALUES ('2014-01-01','George','Alibaba', 800, 90.12, 'tech');
+
+ INSERT INTO tMngrSecHist VALUES ('2015-01-01','Paul','Amazon', 250, 100.5, 'tech');
+ INSERT INTO tMngrSecHist VALUES ('2015-01-01','Paul','Amazon', 1000, 150.5, 'tech');
+ INSERT INTO tMngrSecHist VALUES ('2015-01-01','Paul','Google', 100, 50.12, 'tech');
+ INSERT INTO tMngrSecHist VALUES ('2015-01-01','John','Google', 1000, 150.5, 'tech');
+
+ History {histDate = 2014-01-01, histValue = Manager {mngrName = "Paul", mngrSecurCol = 5.6475170399221e-3}}
+ History {histDate = 2014-01-01, histValue = Manager {mngrName = "George", mngrSecurCol = 0.994352482960078}}
+ History {histDate = 2015-01-01, histValue = Manager {mngrName = "Paul", mngrSecurCol = 0.545505334650009}}
+ History {histDate = 2015-01-01, histValue = Manager {mngrName = "John", mngrSecurCol = 0.454494665349991}}
+
