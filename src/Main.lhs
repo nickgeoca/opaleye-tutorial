@@ -48,6 +48,9 @@ Problem 1
  INSERT INTO tMngrSecHist VALUES ('2015-01-01','Paul','Amazon', 1000, 150.5, 'tech');
  INSERT INTO tMngrSecHist VALUES ('2015-01-01','Paul','Google', 100, 50.12, 'tech');
  INSERT INTO tMngrSecHist VALUES ('2015-01-01','John','Google', 1000, 150.5, 'tech');
+ INSERT INTO tMngrSecHist VALUES ('2015-01-01','John','NEM', 200, 50.5, 'mining');
+ INSERT INTO tMngrSecHist VALUES ('2015-01-01','John','RGLD', 100, 50.5, 'mining');
+ INSERT INTO tMngrSecHist VALUES ('2015-01-01','Paul','RGLD', 100, 50.5, 'mining');
 
  History {histDate = 2014-01-01, histValue = Manager {mngrName = "Paul", mngrSecurCol = 5.6475170399221e-3}}
  History {histDate = 2014-01-01, histValue = Manager {mngrName = "George", mngrSecurCol = 0.994352482960078}}
@@ -58,6 +61,9 @@ Problem 1
 >                   a <- runQuery conn (qMngrPcntNetWorthHist qMngrSecHist) :: IO [QrtrlyMngrPcntNetWorth]
 >                   mapM_ print a
 
+> testProblem2 = do conn <- connect ConnectInfo { connectHost="127.0.0.1",connectPort=5432,connectUser="postgres",connectPassword="password",connectDatabase = "managers" }
+>                   a <- runQuery conn (qHistMngrSectorPcnt qMngrSecHist) :: IO [QrtrlyMngrSectorPct]
+>                   mapM_ print a
 
 
 --------------------------------------------------

@@ -12,16 +12,16 @@
 >
 > import           Opaleye (Column, 
 >                          Table(Table), required, queryTable,
->                          Query, QueryArr, restrict, (.==), (.<=), (.&&), (.<),
+>                          Query, QueryArr, restrict, (.==), (.<=), (.&&), (.<), 
 >                          (.++), ifThenElse, pgString, pgDouble, aggregate, groupBy,
 >                          count, avg, sum, leftJoin, runQuery,
 >                          showSqlForPostgres, Unpackspec,
->                          PGInt4, PGInt8, PGText, PGDate, PGFloat8, PGBool,
+>                          PGInt4, PGInt8, PGText, PGDate, PGFloat8, PGBool, values,
 >                          pgDay)
 > import qualified Opaleye.Aggregate as A
 > import           Opaleye.Aggregate (Aggregator, aggregate)
 > import           Data.Profunctor (dimap, lmap, rmap)
-> import           Data.Profunctor.Product (p3)
+> import           Data.Profunctor.Product (p3, p4)
 > import           Data.Profunctor.Product.Default (Default, def)
 > import           Data.Profunctor.Product.TH (makeAdaptorAndInstance)
 > import           Data.Time.Calendar
@@ -44,9 +44,11 @@ Types
 > type ManagerPcntNetWorth = Manager' String Double
 > type QrtrlyMngrPcntNetWorth = History' Day ManagerPcntNetWorth
 
-> type MngrSectorPcnt = Manager' (Column PGText)  (ColumnSecuritySector, Column PGFloat8)
-> type ColumnQrtrlyMngrSectorPct = History' (Column PGDate) MngrSectorPcnt
+> type ColumnMngrSectorPcnt      = Manager' (Column PGText)  (ColumnSecuritySector, Column PGFloat8)
+> type ColumnQrtrlyMngrSectorPct = History' (Column PGDate)   ColumnMngrSectorPcnt
 
+> type MngrSectorPcnt = Manager' String (SecuritySector, Double)
+> type QrtrlyMngrSectorPct = History' Day MngrSectorPcnt
 
 This query should report, by manager, quarter, and sector, the
    percentage of the aggregate value of a manager's securities for each
@@ -72,45 +74,49 @@ Query - qHistMngrSectorPcnt
 
 > qHistMngrSectorPcnt :: Query ColumnQrtrlyMngrSec -> Query ColumnQrtrlyMngrSectorPct
 > qHistMngrSectorPcnt qry = proc () -> do 
->    (History dateMngr (Manager name security))  <- qry -< ()
->    
->    (History dateSector (SecuritySector nameSector, netWorthSector))  <- qHistSectorNetWorth qry -< ()
->    (History dateSector' (Manager nameMngr (SecuritySector nameSector', mngrNetWorthSector)))  <- qHistMngrSectorNetWorth qry -< ()
+> 
+>    (History dateSector  (Manager nameMngr (SecuritySector nameSector, mngrNetWorthSector))) <- qHistMngrSectorNetWorth qry -< ()
+>    (History dateSector' (SecuritySector nameSector', netWorthSector))                       <- qHistSectorNetWorth qry -< ()
 > 
 >    restrict -< dateSector .== dateSector'
+>    restrict -< nameSector .== nameSector'
 > 
->    returnA -< History dateMngr (Manager nameMngr (SecuritySector nameSector, mngrNetWorthSector / netWorthSector))
-
+>    returnA -< History dateSector (Manager nameMngr (SecuritySector nameSector, mngrNetWorthSector / netWorthSector))
 
 Queries- miscellaneous
 
-
-> ERROR HERE!!
 > type ColumnHistSectorNetWorth = History' (Column PGDate) (ColumnSecuritySector, Column PGFloat8)
+> 
 > qHistSectorNetWorth :: Query ColumnQrtrlyMngrSec -> Query ColumnHistSectorNetWorth
-> qHistSectorNetWorth qry = 
->   aggregate (pHistory $ History
->                 { histDate = groupBy
->                 , histValue = pManager $ Manager
->                      { mngrName = groupBy
->                      , mngrSecurCol = aSecColNetWorth  }}) 
->            qry
+> qHistSectorNetWorth qry = proc () -> do
+>   (date, sectorName, sectorValue) <- aggregate aSectorSum (alter qry) -< () 
+>   returnA -< History date (SecuritySector sectorName, sectorValue)
+> 
+>   where alter qry = proc () -> do 
+>           (History date (Manager _ (Security _
+>                                     (SecurityQuant secQuant) 
+>                                     (SecurityValue secValue) 
+>                                     (SecuritySector secSector)))) <- qry -< ()
+>           returnA -<    (date   , secSector, (secQuant, secValue))
+>         aSectorSum = p3 (groupBy, groupBy  , aDotProduct fst snd)
 
-> ERROR HERE!!
 > type ColumnHistoryMngrSectorNetWorth 
 >      = History' (Column PGDate) 
 >                 (Manager' (Column PGText) 
 >                           (ColumnSecuritySector, Column PGFloat8)) 
+> 
 > qHistMngrSectorNetWorth :: Query ColumnQrtrlyMngrSec -> Query ColumnHistoryMngrSectorNetWorth
-> qHistMngrSectorNetWorth qry =
->   aggregate (pHistory $ History
->                 { histDate = groupBy
->                 , histValue = pManager $ Manager
->                      { mngrName = groupBy
->                      , mngrSecurCol = aSecColNetWorth  }}) 
->            qry
-
-
+> qHistMngrSectorNetWorth qry = proc () -> do
+>   (date, mngrName, sectorName, sectorValue) <- aggregate aSectorSum (alter qry) -< () 
+>   returnA -< History date (Manager mngrName (SecuritySector sectorName, sectorValue))
+> 
+>   where alter qry = proc () -> do 
+>           (History date (Manager mngrName (Security _
+>                                               (SecurityQuant secQuant) 
+>                                               (SecurityValue secValue) 
+>                                               (SecuritySector secSector)))) <- qry -< ()
+>           returnA -<    (date   , mngrName, secSector, (secQuant, secValue))
+>         aSectorSum = p4 (groupBy, groupBy , groupBy  , aDotProduct fst snd)
 
 > qHistNetWorth :: Query ColumnQrtrlyMngrNetWorth -> Query ColumnQrtrlyNetWorth  -- TODO: QueryArr ... 
 > qHistNetWorth qry = 
@@ -125,16 +131,23 @@ Queries- miscellaneous
 >                 { histDate = groupBy
 >                 , histValue = pManager $ Manager
 >                      { mngrName = groupBy
->                      , mngrSecurCol = aSecColNetWorth  }}) 
+>                      , mngrSecurCol = aDotProduct val quant }}) 
 >             qry
-
-
-Aggregators
-
-> aSecColNetWorth :: Aggregator ColumnSecurity (Column PGFloat8)
-> aSecColNetWorth = lmap (\sec ->  val sec * quant sec) sum
 >   where val   = securityValue . secValue
 >         quant = securityQuant . secQuant
 
+Aggregators
+
 > aHistColNetWorth :: Aggregator (Manager' (Column PGText) (Column PGFloat8)) (Column PGFloat8)
 > aHistColNetWorth = lmap (\mngr -> mngrSecurCol mngr) sum
+
+
+aDotProduct :: Opaleye.Internal.Column.PGNum a1 
+            => (a -> Column a1) 
+            -> (a -> Column a1) 
+            -> Aggregator a (Column a1)
+
+> aDotProduct :: (a -> Column PGFloat8) 
+>             -> (a -> Column PGFloat8) 
+>             -> Aggregator a (Column PGFloat8)
+> aDotProduct f1 f2 = lmap (\x ->  f1 x * f2 x) sum
