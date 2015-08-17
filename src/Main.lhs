@@ -52,10 +52,21 @@ Problem 1
  INSERT INTO tMngrSecHist VALUES ('2015-01-01','John','RGLD', 100, 50.5, 'mining');
  INSERT INTO tMngrSecHist VALUES ('2015-01-01','Paul','RGLD', 100, 50.5, 'mining');
 
+ P1
+ History {histDate = 2015-01-01, histValue = Manager {mngrName = "Paul", mngrSecurCol = 0.528515357050353}}
  History {histDate = 2014-01-01, histValue = Manager {mngrName = "Paul", mngrSecurCol = 5.6475170399221e-3}}
+ History {histDate = 2015-01-01, histValue = Manager {mngrName = "John", mngrSecurCol = 0.471484642949647}}
  History {histDate = 2014-01-01, histValue = Manager {mngrName = "George", mngrSecurCol = 0.994352482960078}}
- History {histDate = 2015-01-01, histValue = Manager {mngrName = "Paul", mngrSecurCol = 0.545505334650009}}
- History {histDate = 2015-01-01, histValue = Manager {mngrName = "John", mngrSecurCol = 0.454494665349991}}
+
+ P2
+ History {histDate = 2015-01-01, histValue = Manager {mngrName = "John", mngrSecurCol = (SecuritySector "tech",0.454494665349991)}}
+ History {histDate = 2014-01-01, histValue = Manager {mngrName = "George", mngrSecurCol = (SecuritySector "tech",0.994352482960078)}}
+ History {histDate = 2015-01-01, histValue = Manager {mngrName = "Paul", mngrSecurCol = (SecuritySector "tech",0.545505334650009)}}
+ History {histDate = 2015-01-01, histValue = Manager {mngrName = "Paul", mngrSecurCol = (SecuritySector "mining",0.25)}}
+ History {histDate = 2014-01-01, histValue = Manager {mngrName = "Paul", mngrSecurCol = (SecuritySector "tech",5.6475170399221e-3)}}
+ History {histDate = 2015-01-01, histValue = Manager {mngrName = "John", mngrSecurCol = (SecuritySector "mining",0.75)}}
+
+
 
 > testProblem1 = do conn <- connect ConnectInfo { connectHost="127.0.0.1",connectPort=5432,connectUser="postgres",connectPassword="password",connectDatabase = "managers" }
 >                   a <- runQuery conn (qMngrPcntNetWorthHist qMngrSecHist) :: IO [QrtrlyMngrPcntNetWorth]
