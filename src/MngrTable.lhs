@@ -20,7 +20,7 @@
 > import           Opaleye.Aggregate (Aggregator, aggregate)
 > import           Data.Profunctor.Product.TH (makeAdaptorAndInstance)
 > import           Data.Profunctor (dimap, lmap, rmap)
-> import           Data.Profunctor.Product (p3)
+> import           Data.Profunctor.Product (p2, p3)
 > import           Data.Profunctor.Product.Default (Default, def)
 > import           Data.Time.Calendar
 > import           Control.Arrow (returnA, (<<<))
@@ -28,10 +28,10 @@
 
 Key words: BUG, TODO, NOTE
 
---------------------------------------------------
-Types
+----------------------------------------------------------------------------------------------------
+-- TODO: Break this out into seperate file?
 
-Security
+-- Types
 
 > data SecurityName' a = SecurityName a deriving Show
 > securityName (SecurityName x) = x
@@ -39,6 +39,39 @@ Security
 > securityName' s = pSecurityName $ SecurityName $ required s
 > type SecurityName       = SecurityName' String
 > type ColumnSecurityName = SecurityName' (Column PGText)
+
+> data SecuritySector' a = SecuritySector a deriving Show
+> securitySector (SecuritySector x) = x
+> $(makeAdaptorAndInstance "pSecuritySector" ''SecuritySector')
+> securitySector' s = pSecuritySector $ SecuritySector $ required s
+> type SecuritySector       = SecuritySector' String
+> type ColumnSecuritySector = SecuritySector' (Column PGText)
+
+> type SecInfo = (SecurityName, SecuritySector)
+> type ColumnSecInfo = (ColumnSecurityName, ColumnSecuritySector)
+
+--------------------------------------------------
+-- Sql
+
+Tables
+
+> tSecInfo :: Table ColumnSecInfo
+>                   ColumnSecInfo
+> tSecInfo = Table "tSecInfo" $ p2 ( pSecurityName   $ SecurityName   $ required "sec_name"
+>                                  , pSecuritySector $ SecuritySector $ required "sec_sector")
+
+Queries
+
+> qSecInfo :: Query ColumnSecInfo
+> qSecInfo = queryTable tSecInfo
+
+
+----------------------------------------------------------------------------------------------------
+Types
+
+Security
+
+
 
 > data SecurityQuant' a = SecurityQuant a deriving Show
 > securityQuant (SecurityQuant x) = x
@@ -54,27 +87,18 @@ Security
 > type SecurityValue       = SecurityValue' Double
 > type ColumnSecurityValue = SecurityValue' (Column PGFloat8)
 
-> data SecuritySector' a = SecuritySector a deriving Show
-> securitySector (SecuritySector x) = x
-> $(makeAdaptorAndInstance "pSecuritySector" ''SecuritySector')
-> securitySector' s = pSecuritySector $ SecuritySector $ required s
-> type SecuritySector       = SecuritySector' String
-> type ColumnSecuritySector = SecuritySector' (Column PGText)
 
-> data Security' a b c d = Security
+> data Security' a b c = Security
 >  { secName   :: a
 >  , secQuant  :: b
->  , secValue  :: c 
->  , secSector :: d } deriving Show
+>  , secValue  :: c } deriving Show
 > $(makeAdaptorAndInstance "pSecurity" ''Security')
-> security' n q v s = pSecurity $ Security { secName   = securityName' n
->                                          , secQuant  = securityQuant' q
->                                          , secValue  = securityValue' v
->                                          , secSector = securitySector' s
->                                          }
+> security' n q v = pSecurity $ Security { secName   = securityName' n
+>                                        , secQuant  = securityQuant' q
+>                                        , secValue  = securityValue' v }
 
-> type Security       = Security'       SecurityName       SecurityQuant       SecurityValue SecuritySector
-> type ColumnSecurity = Security' ColumnSecurityName ColumnSecurityQuant ColumnSecurityValue ColumnSecuritySector
+> type Security       = Security'       SecurityName       SecurityQuant       SecurityValue
+> type ColumnSecurity = Security' ColumnSecurityName ColumnSecurityQuant ColumnSecurityValue
 
 Manager
 
@@ -107,7 +131,7 @@ Tables
 > tMngrSecHist = Table "tMngrSecHist" 
 >    (pHistory $ History 
 >        { histDate  = required "quarter"  
->        , histValue = manager' "mngr_name" (security' "sec_name" "sec_quant" "sec_value" "sec_sector")  -- TODO: Put column names in type section?
+>        , histValue = manager' "mngr_name" (security' "sec_name" "sec_quant" "sec_value")  -- TODO: Put column names in type section?
 >        }
 >    )
 

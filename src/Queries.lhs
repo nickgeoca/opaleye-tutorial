@@ -11,7 +11,7 @@
 > import           Prelude hiding (sum)
 >
 > import           Opaleye (Column, 
->                          Table(Table), required, queryTable,
+>                          Table(Table), required, queryTable, fromNullable, toNullable, Nullable, matchNullable,
 >                          Query, QueryArr, restrict, (.==), (.<=), (.&&), (.<), 
 >                          (.++), ifThenElse, pgString, pgDouble, aggregate, groupBy,
 >                          count, avg, sum, leftJoin, runQuery,
@@ -21,7 +21,7 @@
 > import qualified Opaleye.Aggregate as A
 > import           Opaleye.Aggregate (Aggregator, aggregate)
 > import           Data.Profunctor (dimap, lmap, rmap)
-> import           Data.Profunctor.Product (p3, p4)
+> import           Data.Profunctor.Product (p2, p3, p4)
 > import           Data.Profunctor.Product.Default (Default, def)
 > import           Data.Profunctor.Product.TH (makeAdaptorAndInstance)
 > import           Data.Time.Calendar
@@ -50,12 +50,6 @@ Types
 > type MngrSectorPcnt = Manager' String (SecuritySector, Double)
 > type QrtrlyMngrSectorPct = History' Day MngrSectorPcnt
 
-This query should report, by manager, quarter, and sector, the
-   percentage of the aggregate value of a manager's securities for each
-   sector in which a manager owns securities. This query should utilize the
-   sector of the underlying for option securities, and should allocate
-   issuers without a sector to an unknown sector.
-
 --------------------------------------------------
 Sql
 
@@ -73,50 +67,32 @@ Query - qMngrPcntNetWorthHist
 
 Query - qHistMngrSectorPcnt
 
-> qHistMngrSectorPcnt :: Query ColumnQrtrlyMngrSec -> Query ColumnQrtrlyMngrSectorPct
-> qHistMngrSectorPcnt qry = proc () -> do 
->    (History date  (Manager nameMngr (SecuritySector nameSector, mngrNetWorthSector))) <- qHistMngrSectorNetWorth qry -< ()
->    (History date' (SecuritySector nameSector', netWorthSector))                       <- qHistSectorNetWorth $ qHistMngrSectorNetWorth qry -< ()
+> type ColNullText = Column (Nullable PGText)
+
+> qHistMngrSectorPcnt :: Query ColumnQrtrlyMngrSec -> Query ColumnSecInfo -> Query ColumnQrtrlyMngrSectorPct
+> qHistMngrSectorPcnt qMngr qSecInfo = proc () -> do 
 > 
->    restrict -< date .== date'
->    restrict -< nameSector .== nameSector'
+>   (cDate, cMngrName, cSector, cNetWorth) <- qHistMngrSectorVal -< ()
+>   (cDate', cSector', cNetWorth')         <- qHistSectorVal     -< ()
+>   
+>   restrict -< cDate   .== cDate'
+>   restrict -< cSector .== cSector'
+>     
+>   returnA -< History cDate (Manager cMngrName (SecuritySector cSector, cNetWorth / cNetWorth'))
 > 
->    let mngrSectorPcntNetWorth = mngrNetWorthSector / netWorthSector
->    returnA -< History date $ Manager nameMngr (SecuritySector nameSector, mngrSectorPcntNetWorth)
->      -- where fn = proc q -> do   aggregate (p3 (groupBy, groupBy, sum)) q -< ()      -- >    fn -< (date, nameSector, mngrNetWorthSector)
- 
+>   where joinFn (m, s) = (securityName.secName.mngrSecurCol.histValue $ m) .== (securityName.fst $ s)
+>         qAlter1 qry = proc () -> do (History cDate (Manager cMngrName (Security cSecName cSecQuant cSecValue)), (SecurityName cNullSecName, SecuritySector cNullSector)) <- qry -< ()  
+>                                     let cSector = fromNullable (pgString "unknown_sector")   cNullSector
+>                                     returnA -< (cDate  , cMngrName, cSector, (cSecQuant, cSecValue))
+>         aHistMngrSectorVal =              p4  (groupBy, groupBy  , groupBy, aDotProduct (securityQuant.fst) (securityValue.snd)) 
+>         qAlter2 qry = proc () -> do (cDate, _, cSector, netWorth) <- qry -< ()  
+>                                     returnA -< (cDate  , cSector, netWorth)
+>         aHistSectorVal =                  p3   (groupBy, groupBy, sum) 
+>         qJoin              = leftJoin qMngr qSecInfo joinFn :: Query (ColumnQrtrlyMngrSec, (SecurityName' ColNullText, SecuritySector' ColNullText))
+>         qHistMngrSectorVal = aggregate aHistMngrSectorVal $ qAlter1 qJoin
+>         qHistSectorVal     = aggregate aHistSectorVal     $ qAlter2 qHistMngrSectorVal
+
 Queries- miscellaneous
-
-> type ColumnHistSectorNetWorth = History' (Column PGDate) (ColumnSecuritySector, Column PGFloat8)
-> 
-> qHistSectorNetWorth :: Query ColumnHistoryMngrSectorNetWorth -> Query ColumnHistSectorNetWorth
-> qHistSectorNetWorth qry = proc () -> do
->   (date, sectorName, sectorValue) <- aggregate aSectorSum (alter qry) -< () 
-> 
->   returnA -< History date (SecuritySector sectorName, sectorValue)
-> 
->   where alter qry = proc () -> do 
->           (History date (Manager _ (SecuritySector sectorName, sectorValue))) <- qry -< ()
->           returnA -<    (date   , sectorName, sectorValue)
->         aSectorSum = p3 (groupBy, groupBy   , sum)
-
-> type ColumnHistoryMngrSectorNetWorth 
->      = History' (Column PGDate) 
->                 (Manager' (Column PGText) 
->                           (ColumnSecuritySector, Column PGFloat8)) 
-> 
-> qHistMngrSectorNetWorth :: Query ColumnQrtrlyMngrSec -> Query ColumnHistoryMngrSectorNetWorth
-> qHistMngrSectorNetWorth qry = proc () -> do
->   (date, mngrName, sectorName, sectorValue) <- aggregate aSectorSum (alter qry) -< () 
->   returnA -< History date (Manager mngrName (SecuritySector sectorName, sectorValue))
-> 
->   where alter qry = proc () -> do 
->           (History date (Manager mngrName (Security _
->                                               (SecurityQuant secQuant) 
->                                               (SecurityValue secValue) 
->                                               (SecuritySector secSector)))) <- qry -< ()
->           returnA -<    (date   , mngrName, secSector, (secQuant, secValue))
->         aSectorSum = p4 (groupBy, groupBy , groupBy  , aDotProduct fst snd)
 
 > qHistNetWorth :: Query ColumnQrtrlyMngrNetWorth -> Query ColumnQrtrlyNetWorth  -- TODO: QueryArr ... 
 > qHistNetWorth qry = 
