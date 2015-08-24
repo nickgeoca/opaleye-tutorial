@@ -13,7 +13,7 @@ import Prelude hiding (sum)
 import Opaleye (Column, Query,
                 Nullable, fromNullable,
                 restrict, (.==), ifThenElse, pgString, 
-                sum, leftJoin, aggregate, groupBy, 
+                sum, leftJoin, aggregate, groupBy, count,
                 PGText, PGDate, PGFloat8)
 import Opaleye.Aggregate (Aggregator)
 import Data.Profunctor (lmap)
@@ -116,7 +116,7 @@ qQuarterlySectorTotal :: (Default Opaleye.Internal.Join.NullMaker b (SecuritySec
                       -> Query (SecurityName' (Column PGText), b)
                       -> Query (Column PGDate, Column PGText, Column PGFloat8)
 qQuarterlySectorTotal qQMS qSI = 
-  let aQuarterlySectorTotal = p4 (groupBy, sum , groupBy, sum) 
+  let aQuarterlySectorTotal = p4 (groupBy, count , groupBy, sum) 
   in proc () -> do (cDate, _, cSector, cValue) <- aggregate aQuarterlySectorTotal $ qQuarterlyManagerSectorTotal qQMS qSI -< ()
                    returnA -< (cDate, cSector, cValue)
 
