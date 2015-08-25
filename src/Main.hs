@@ -1,7 +1,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 
-import MngrTable
+import Tables
 import Queries
+import Types
 
 import Prelude hiding (sum)
 import Opaleye (Query, runQuery, showSqlForPostgres, Unpackspec)
@@ -37,7 +38,7 @@ testProblems = do
                                          then "Pass" 
                                          else "Fail"
  
-   result1 <- runQuery conn $ qQuarterlyManagerShare qQuarterlyManagerSecurity :: IO [QuarterlyManagerShare]
+   result1 <- runQuery conn $ qQuarterlyManagerShare tqQuarterlyManagerSecurity :: IO [QuarterlyManagerShare]
    printResult "Test 1: " $
                areListEq result1 ([ History {histDate = readDay "2015-01-01", histValue = Manager {mngrName = "Paul", mngrSecurCol = 0.546718288204319}}
                                   , History {histDate = readDay "2014-01-01", histValue = Manager {mngrName = "Paul", mngrSecurCol = 5.6475170399221e-3}}
@@ -45,7 +46,7 @@ testProblems = do
                                   , History {histDate = readDay "2014-01-01", histValue = Manager {mngrName = "George", mngrSecurCol = 0.994352482960078}}
                                   ] :: [QuarterlyManagerShare])
     
-   result2 <- runQuery conn $ qQuarterlyManagerSectorShare qQuarterlyManagerSecurity qSecurityInformation :: IO [QuarterlyManagerSectorShare]
+   result2 <- runQuery conn $ qQuarterlyManagerSectorShare tqQuarterlyManagerSecurity tqSecurityInformation :: IO [QuarterlyManagerSectorShare]
    printResult "Test 2: " $ 
                areListEq result2 ([ History {histDate = readDay "2014-01-01", histValue = Manager {mngrName = "George", mngrSecurCol = (SecuritySector "mining",1.0)}}
                                   , History {histDate = readDay "2015-01-01", histValue = Manager {mngrName = "Paul", mngrSecurCol = (SecuritySector "mining",0.25)}}

@@ -6,7 +6,8 @@
  
 module Queries where
 
-import MngrTable
+import Types
+import Tables
 
 import Prelude hiding (sum)
 
@@ -54,7 +55,6 @@ type ColQuarterlyManagerShare = History' (Column PGDate) ColManagerShare
 type    QuarterlyManagerSectorShare = History'         Day        ManagerSectorShare
 type ColQuarterlyManagerSectorShare = History' (Column PGDate) ColManagerSectorShare
 
---   division
 
 --------------------------------------------------
 ---- Sql
